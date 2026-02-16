@@ -1,16 +1,28 @@
 build/
 dist/
 .idea/
+
 2026/Test-Match-Videos/
 2026/out/
 2026/debug_frames/
 
-.egg
+.eggs/
+.eggs
 *.egg-info
 
-*.pyc
 __pycache__/
+*.pyc
+
 .venv/
 venv/
 .env
 .DS_Store
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+*.log
+*.tmp
