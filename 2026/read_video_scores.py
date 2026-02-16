@@ -17,7 +17,7 @@ def find_repo_root(start: Path) -> Path:
             return cur
         if cur.parent == cur:
             break
-        cur = cur.parentgit
+        cur = cur.parent
     return start.resolve()
 
 TESSERACT_EXE = os.getenv("TESSERACT_EXE")
@@ -266,8 +266,8 @@ def main():
     parser.add_argument("--samples-per-sec", type=int, default=DEFAULT_SAMPLES_PER_SEC)
     parser.add_argument("--max-jump-per-sec", type=int, default=DEFAULT_MAX_JUMP_PER_SEC)
     parser.add_argument("--allow-reset", action="store_true", default=DEFAULT_ALLOW_RESET)
-    parser.add_argument("--debug-seconds", type=int, default=5)
-    parser.add_argument("--out", type=str, default=str(repo_root / "out"))
+    parser.add_argument("--debug-seconds", type=int, default=10)
+    parser.add_argument("--out", type=str, default=str(script_dir / "out"))
 
     args = parser.parse_args()
 
