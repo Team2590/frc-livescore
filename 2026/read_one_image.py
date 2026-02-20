@@ -13,7 +13,8 @@ if TESSERACT_EXE:
 
 # Tuned relative boxes (x1, y1, x2, y2) to FULL IMAGE
 BLUE_REL = (0.405, 0.055, 0.47, 0.12)
-RED_REL  = (0.532, 0.055, 0.595, 0.12)
+RED_REL = (0.532, 0.055, 0.595, 0.12)
+
 TOP_REL  = (0.0, 0.0, 1.0, 0.22)
 
 OCR_CFG = "--oem 3 --psm 8 -c tessedit_char_whitelist=0123456789"
@@ -46,7 +47,7 @@ def crop_rel(img: Image.Image, rel_box):
 
 def main():
     # Default image path in repo
-    img_path = BASE / "Test-Match-Images" / "match3.png"
+    img_path = BASE / "Test-Match-Images" / "match2.png"
     if not img_path.exists():
         raise FileNotFoundError(
             f"Could not find image at: {img_path}\n"
