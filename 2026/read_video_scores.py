@@ -1,5 +1,5 @@
 """
-FRC match score extractor.
+FRC match score extractor!
 
 Design priorities:
   1. Accuracy  — SCALE=3, 5 samples/sec, confidence-filtered OCR
@@ -31,9 +31,24 @@ if TESSERACT_EXE:
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_EXE
 
 # Relative crop boxes  (x1, y1, x2, y2)
-BLUE_REL  = (0.405, 0.055, 0.470,  0.120)
-RED_REL   = (0.532, 0.055, 0.595,  0.120)
-TIMER_REL = (0.469, 0.055, 0.5315, 0.118)
+# Scoreboard layout flag
+# BLUE_LEFT = True  → blue score is on the LEFT side of the overlay (FRC default)
+# BLUE_LEFT = False → blue score is on the RIGHT side (some regional broadcasts)
+# Override from the command line with --blue-left or --blue-right.
+BLUE_LEFT = False
+
+# The two score panel positions (tightened to center 60% to avoid edge artifacts)
+# DO NOT EDIT THESE!! —> change BLUE_LEFT above instead
+_LEFT_BOX  = (0.4180, 0.055, 0.4570, 0.120)
+_RIGHT_BOX = (0.5446, 0.055, 0.5824, 0.120)
+
+def _assign_boxes(blue_left: bool):
+    global BLUE_REL, RED_REL
+    BLUE_REL = _LEFT_BOX  if blue_left else _RIGHT_BOX
+    RED_REL  = _RIGHT_BOX if blue_left else _LEFT_BOX
+
+_assign_boxes(BLUE_LEFT)
+TIMER_REL = (0.469,  0.055, 0.5315, 0.118)
 TOP_REL   = (0.0,   0.0,   1.0,    0.22)
 
 OCR_CFG_SCORE = (
@@ -43,26 +58,24 @@ OCR_CFG_SCORE = (
 )
 OCR_CFG_TIMER = "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789:"
 
-# Scale=3 is important — smaller values cause misreads on scoreboard fonts.
+# Scale=3 is important (smaller values cause misreads on scoreboard fonts)
 SCALE = 3
 
 AUTON_LEN = 20
 TELE_LEN  = 140
 TOTAL_LEN = AUTON_LEN + TELE_LEN
 
-# Scores are forced to 0 for this many elapsed seconds.
-WARMUP_SECONDS = 1
-
-# During the first EARLY_WINDOW elapsed seconds, apply a tighter jump cap.
-EARLY_WINDOW   = 10
-EARLY_MAX_JUMP = 8
+# Covers the entire AUTO period (20s) with a tighter jump cap
+# 25 pts/sec allows legitimate large auto scores
+# while blocking OCR noise that reads 30+ when the true score is 0-10
+EARLY_WINDOW   = 20
+EARLY_MAX_JUMP = 25
 
 DEFAULT_SAMPLES_PER_SEC  = 5
 DEFAULT_MAX_JUMP_PER_SEC = 40
 DEFAULT_ALLOW_RESET      = False  # FRC scores are monotonically non-decreasing
 
 MAX_WORKERS = min(6, os.cpu_count() or 2)
-
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -78,7 +91,6 @@ def find_repo_root(start: Path) -> Path:
         cur = cur.parent
     return start.resolve()
 
-
 def crop_rel(img: Image.Image, box):
     w, h = img.size
     l = max(0, min(int(box[0] * w), w - 1))
@@ -87,10 +99,8 @@ def crop_rel(img: Image.Image, box):
     b = max(t + 1, min(int(box[3] * h), h))
     return img.crop((l, t, r, b)), (l, t, r, b)
 
-
 def cv2_to_pil(frame: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-
 
 def preprocess(pil_crop: Image.Image, scale: int = SCALE) -> Image.Image:
     gray = pil_crop.convert("L").resize(
@@ -104,16 +114,15 @@ def preprocess(pil_crop: Image.Image, scale: int = SCALE) -> Image.Image:
     th = cv2.morphologyEx(th, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
     return Image.fromarray(th)
 
-
 # ---------------------------------------------------------------------------
 # OCR
 # ---------------------------------------------------------------------------
 
 def _clean_score(text: str) -> Optional[int]:
     """
-    Parse a raw OCR string into a score integer.
-    Handles 1-, 2-, 3-, and 4+-digit OCR output correctly.
-    No artificial ceiling — scores can exceed 500 or 999 in high-scoring matches.
+    Parse a raw OCR string into a score integer
+    Handles 1-, 2-, 3-, and 4+-digit OCR output correctly
+    No artificial ceiling (since scores can exceed 500 in crazy matches)
     """
     s = re.sub(r"[^0-9]", "", text.strip())
     if not s:
@@ -126,11 +135,10 @@ def _clean_score(text: str) -> Optional[int]:
         val = int(s[:4])
     return val if 0 <= val <= 9999 else None
 
-
 def _ocr_score(proc_img: Image.Image) -> Optional[int]:
     """
-    Score OCR with per-token confidence filtering.
-    No hard ceiling on score value — the graph and CSV will auto-scale.
+    Score OCR with per-token confidence filtering
+    No hard ceiling on score value (the graph and CSV will auto-scale)
     """
     try:
         data = pytesseract.image_to_data(
@@ -149,7 +157,6 @@ def _ocr_score(proc_img: Image.Image) -> Optional[int]:
 
     return _clean_score(raw)
 
-
 def _parse_timer(text: str) -> Optional[int]:
     text = text.strip().replace(" ", "").replace("O", "0").replace("|", "1")
     m = re.search(r"(\d{1,2}):(\d{2})", text)
@@ -158,10 +165,8 @@ def _parse_timer(text: str) -> Optional[int]:
     mm, ss = int(m.group(1)), int(m.group(2))
     return None if ss >= 60 else mm * 60 + ss
 
-
 def _ocr_timer(proc_img: Image.Image) -> Optional[int]:
     return _parse_timer(pytesseract.image_to_string(proc_img, config=OCR_CFG_TIMER))
-
 
 # ---------------------------------------------------------------------------
 # Timer math
@@ -171,14 +176,13 @@ def timer_to_elapsed(timer_sec: int, phase: str) -> int:
     return AUTON_LEN - timer_sec if phase == "AUTO" \
         else AUTON_LEN + (TELE_LEN - timer_sec)
 
-
 def elapsed_to_timer(elapsed: int) -> tuple[int, str]:
     """
     Deterministically compute the match timer for any elapsed second.
 
     elapsed 0  → 0:20  (AUTO start)
     elapsed 19 → 0:01
-    elapsed 20 → 2:20  (TELE start — guaranteed correct jump in CSV)
+    elapsed 20 → 2:20  (TELE start)
     elapsed 160→ 0:00
     """
     if elapsed <= AUTON_LEN:
@@ -187,9 +191,8 @@ def elapsed_to_timer(elapsed: int) -> tuple[int, str]:
         rem = TELE_LEN - (elapsed - AUTON_LEN)
     return rem, f"{rem // 60}:{rem % 60:02d}"
 
-
 # ---------------------------------------------------------------------------
-# Per-frame OCR  (runs inside thread pool — no nested pools)
+# Per-frame OCR  (runs inside thread pool — no nested pools for time-efficiency)
 # ---------------------------------------------------------------------------
 
 def _process_frame(frame_bgr: np.ndarray) -> tuple[Optional[int], Optional[int], Optional[int]]:
@@ -208,10 +211,9 @@ def _process_frame(frame_bgr: np.ndarray) -> tuple[Optional[int], Optional[int],
     red  = _ocr_score(preprocess(crop_rel(pil, RED_REL)[0]))
     return timer_sec, blue, red
 
-
-# ---------------------------------------------------------------------------
-# Debug overlay  (only called for the first N seconds)
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------
+# Debug overlay  (testing purposes - only called for the first N seconds to verify accuracy)
+# -------------------------------------------------------------------------------------------
 
 def _save_debug(frame_bgr: np.ndarray, out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -234,7 +236,6 @@ def _save_debug(frame_bgr: np.ndarray, out_dir: Path):
     preprocess(crop_rel(pil, RED_REL)[0]).save(out_dir   / "red_proc.png")
     preprocess(crop_rel(pil, TIMER_REL)[0], scale=2).save(out_dir / "timer_proc.png")
 
-
 # ---------------------------------------------------------------------------
 # Smoothing helpers
 # ---------------------------------------------------------------------------
@@ -244,7 +245,6 @@ def _majority(vals: list[int]) -> int:
     best = max(c.values())
     return max(v for v, n in c.items() if n == best)
 
-
 def _pick_score(candidates: list[Optional[int]], last: int,
                 *, max_jump: int, allow_reset: bool) -> int:
     vals = [v for v in candidates if v is not None]
@@ -253,7 +253,6 @@ def _pick_score(candidates: list[Optional[int]], last: int,
     filtered = [v for v in vals
                 if (allow_reset or v >= last) and v - last <= max_jump]
     return _majority(filtered) if filtered else last
-
 
 # ---------------------------------------------------------------------------
 # Main pipeline
@@ -381,10 +380,6 @@ def process_video(
         blue = _pick_score(blues, last_blue, max_jump=effective_jump, allow_reset=allow_reset)
         red  = _pick_score(reds,  last_red,  max_jump=effective_jump, allow_reset=allow_reset)
 
-        if t < WARMUP_SECONDS:
-            blue = 0
-            red  = 0
-
         timer_remaining, timer_display = elapsed_to_timer(t)
 
         rows.append({
@@ -412,7 +407,6 @@ def process_video(
 
     return rows
 
-
 # ---------------------------------------------------------------------------
 # CSV
 # ---------------------------------------------------------------------------
@@ -428,9 +422,8 @@ def write_csv(rows: list[dict], out_path: Path):
         w.writeheader()
         w.writerows(rows)
 
-
 # ---------------------------------------------------------------------------
-# Graph generation  (auto-scales y-axis to actual final scores)
+# Graph generation
 # ---------------------------------------------------------------------------
 
 def generate_graph(rows: list[dict], out_path: Path):
@@ -448,8 +441,7 @@ def generate_graph(rows: list[dict], out_path: Path):
     bd   = [r["blue_delta"]        for r in rows]
     rd   = [r["red_delta"]         for r in rows]
 
-    # y-axis ceiling: 10% headroom above the highest final score.
-    # No hardcoded cap — works for any score range.
+    # y-axis ceiling: 10% headroom above the highest final score ( works for any score range )
     max_score    = max(blue[-1], red[-1], 1)
     score_ylim   = max_score * 1.12
     max_delta    = max(max(bd), max(rd), 1)
@@ -524,7 +516,6 @@ def generate_graph(rows: list[dict], out_path: Path):
     plt.close(fig)
     print(f"Graph saved : {out_path}")
 
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -539,11 +530,14 @@ def main():
     p.add_argument("--max-jump-per-sec", type=int, default=DEFAULT_MAX_JUMP_PER_SEC)
     p.add_argument("--allow-reset",      action="store_true", default=DEFAULT_ALLOW_RESET)
     p.add_argument("--debug-seconds",    type=int, default=10)
-    p.add_argument("--warmup",           type=int, default=WARMUP_SECONDS,
-                   help="Seconds from match start where scores are forced to 0")
     p.add_argument("--workers",          type=int, default=MAX_WORKERS,
                    help="Parallel OCR workers (default: auto)")
     p.add_argument("--out",              default=str(script_dir / "out"))
+    layout = p.add_mutually_exclusive_group()
+    layout.add_argument("--blue-left",  dest="blue_left", action="store_true",  default=None,
+                        help="Blue alliance score is on the LEFT of the scoreboard (default)")
+    layout.add_argument("--blue-right", dest="blue_left", action="store_false",
+                        help="Blue alliance score is on the RIGHT of the scoreboard")
     args = p.parse_args()
 
     video_path = Path(args.video)
@@ -557,9 +551,13 @@ def main():
         out_root = (repo_root / out_root).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Applies scoreboard layout if overridden on the command line
+    if args.blue_left is not None:
+        _assign_boxes(args.blue_left)
+
     print(f"Video   : {video_path}")
     print(f"Workers : {args.workers}   Scale: {SCALE}x   Samples/sec: {args.samples_per_sec}")
-    print(f"Warmup  : {args.warmup}s clamped to 0")
+    print(f"Layout  : blue on {'LEFT' if BLUE_REL == _LEFT_BOX else 'RIGHT'}")
 
     rows = process_video(
         video_path=video_path,
@@ -577,7 +575,6 @@ def main():
     print(f"\nCSV saved   : {csv_path}")
     print(f"Graph saved : {graph_path}")
     print(f"Debug frames: {out_root / 'debug_frames'}")
-
 
 if __name__ == "__main__":
     main()
